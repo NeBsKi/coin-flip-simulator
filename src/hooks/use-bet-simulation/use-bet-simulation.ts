@@ -5,14 +5,20 @@ import { queryKeys } from '@/lib/query-client';
 import { useGameStore } from '@/store';
 import { useUser } from '@/hooks';
 import type { Bet, CoinSide, Currency, PlaceBetInput } from '@/api/types';
+import type { AutoBetConfig } from '@/store/game-store';
 import { INITIAL_SESSION } from './use-bet-simulation.constants';
-import type { AutoSession, UseBetSimulationResult } from './use-bet-simulation.types';
+import type { AutoSession, StopReason, UseBetSimulationResult } from './use-bet-simulation.types';
 import {
   createActiveSession,
   getNextAutoSession,
   stopSession,
   trimHistory,
 } from './use-bet-simulation.utils';
+
+interface ActiveAutoRun extends AutoBetConfig {
+  currency: Currency;
+  choice: CoinSide;
+}
 
 export function useBetSimulation(): UseBetSimulationResult {
   const queryClient = useQueryClient();
@@ -22,35 +28,40 @@ export function useBetSimulation(): UseBetSimulationResult {
   const [session, setSession] = useState<AutoSession>(INITIAL_SESSION);
   const [lastBet, setLastBet] = useState<Bet | null>(null);
 
-  // Refs mirror latest state for use inside mutation callbacks (fires after async work).
   const sessionRef = useRef<AutoSession>(INITIAL_SESSION);
-  const autoConfigRef = useRef(autoBet);
-  const currencyRef = useRef<Currency>(currency);
-  const choiceRef = useRef<CoinSide>(choice);
-  const manualAmountRef = useRef<number>(betAmount);
+  const activeAutoRunRef = useRef<ActiveAutoRun | null>(null);
+  const nextBetTimeoutRef = useRef<number | null>(null);
+
+  const clearNextBetTimeout = useCallback(() => {
+    if (nextBetTimeoutRef.current == null) return;
+
+    window.clearTimeout(nextBetTimeoutRef.current);
+    nextBetTimeoutRef.current = null;
+  }, []);
+
+  const syncSession = useCallback((nextSession: AutoSession) => {
+    sessionRef.current = nextSession;
+    setSession(nextSession);
+  }, []);
+
+  const stopAuto = useCallback(
+    (reason: StopReason = 'manual') => {
+      if (!sessionRef.current.active) return;
+
+      clearNextBetTimeout();
+      activeAutoRunRef.current = null;
+      syncSession(stopSession(sessionRef.current, reason));
+    },
+    [clearNextBetTimeout, syncSession],
+  );
 
   useEffect(() => {
-    sessionRef.current = session;
-  }, [session]);
-  useEffect(() => {
-    autoConfigRef.current = autoBet;
-  }, [autoBet]);
-  useEffect(() => {
-    currencyRef.current = currency;
-  }, [currency]);
-  useEffect(() => {
-    choiceRef.current = choice;
-  }, [choice]);
-  useEffect(() => {
-    manualAmountRef.current = betAmount;
-  }, [betAmount]);
-
-  // When the user turns off auto-bet, halt the running session.
-  useEffect(() => {
-    if (!autoBet.enabled && sessionRef.current.active) {
-      setSession((prev) => ({ ...prev, active: false, stoppedReason: 'manual' }));
+    if (!autoBet.enabled) {
+      stopAuto('manual');
     }
-  }, [autoBet.enabled]);
+  }, [autoBet.enabled, stopAuto]);
+
+  useEffect(() => clearNextBetTimeout, [clearNextBetTimeout]);
 
   const mutation = useMutation<Bet, Error, PlaceBetInput>({
     mutationFn: placeBet,
@@ -62,71 +73,71 @@ export function useBetSimulation(): UseBetSimulationResult {
       });
       queryClient.invalidateQueries({ queryKey: queryKeys.user });
 
-      if (!sessionRef.current.active) return;
+      const activeAutoRun = activeAutoRunRef.current;
+      if (!sessionRef.current.active || !activeAutoRun) return;
 
       const { nextSession: newSession, stoppedReason } = getNextAutoSession(
         sessionRef.current,
-        autoConfigRef.current,
+        activeAutoRun,
         bet,
       );
-      sessionRef.current = newSession;
-      setSession(newSession);
+      syncSession(newSession);
 
       if (stoppedReason == null) {
-        // schedule next bet after a short cosmetic pause
-        setTimeout(() => {
-          if (!sessionRef.current.active) return;
+        clearNextBetTimeout();
+        nextBetTimeoutRef.current = window.setTimeout(() => {
+          const run = activeAutoRunRef.current;
+          if (!sessionRef.current.active || !run) return;
+
           mutation.mutate({
-            currency: currencyRef.current,
+            currency: run.currency,
             amount: newSession.currentBet,
-            choice: choiceRef.current,
+            choice: run.choice,
           });
         }, 450);
+      } else {
+        activeAutoRunRef.current = null;
       }
     },
     onError: () => {
       if (sessionRef.current.active) {
-        const stopped = stopSession(sessionRef.current, 'error');
-        sessionRef.current = stopped;
-        setSession(stopped);
+        stopAuto('error');
       }
     },
   });
 
   const placeBetAction = useCallback(() => {
     if (mutation.isPending) return;
-    const cfg = autoConfigRef.current;
-    const startAuto = cfg.enabled && !sessionRef.current.active;
+    const startAuto = autoBet.enabled && !sessionRef.current.active;
 
-    const initialAmount = startAuto ? cfg.baseAmount : manualAmountRef.current;
+    const initialAmount = startAuto ? autoBet.baseAmount : betAmount;
 
     if (!user) return;
-    const balance = user.balances[currencyRef.current];
-    if (!Number.isFinite(initialAmount) || initialAmount <= 0) return;
+    const balance = user.balances[currency];
+    if (!Number(initialAmount) || initialAmount <= 0) return;
     if (balance < initialAmount) return;
 
     if (startAuto) {
-      const fresh = createActiveSession(initialAmount);
-      sessionRef.current = fresh;
-      setSession(fresh);
+      activeAutoRunRef.current = {
+        currency,
+        choice,
+        enabled: true,
+        baseAmount: autoBet.baseAmount,
+        stopWin: autoBet.stopWin,
+        stopLoss: autoBet.stopLoss,
+      };
+      syncSession(createActiveSession(initialAmount));
     }
 
     mutation.mutate({
-      currency: currencyRef.current,
+      currency,
       amount: initialAmount,
-      choice: choiceRef.current,
+      choice,
     });
-  }, [mutation, user]);
-
-  const stopAuto = useCallback(() => {
-    if (!sessionRef.current.active) return;
-    const stopped = stopSession(sessionRef.current, 'manual');
-    sessionRef.current = stopped;
-    setSession(stopped);
-  }, []);
+  }, [autoBet, betAmount, choice, currency, mutation, syncSession, user]);
 
   return {
-    placeBet: placeBetAction,
+    placeBetAction,
     stopAuto,
     isSpinning: mutation.isPending || session.active,
     lastBet,

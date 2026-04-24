@@ -17,7 +17,7 @@ export function useBetHistory() {
   const debouncedMin = useDebounce(minAmount, 250);
   const debouncedMax = useDebounce(maxAmount, 250);
 
-  const bets = useMemo(() => query.data ?? [], [query.data]);
+  const bets = query.data ?? [];
 
   const filteredBets = useMemo(() => {
     return bets.filter((bet) => {

@@ -27,7 +27,7 @@ export function BetPanel() {
   const { currency, setCurrency, betAmount, setBetAmount, choice, setChoice, autoBet } =
     useGameStore();
   const {
-    placeBet,
+    placeBetAction,
     stopAuto,
     isSpinning,
     lastBet,
@@ -157,7 +157,7 @@ export function BetPanel() {
                 canBet={canBet}
                 isLoading={isLoading}
                 isSpinning={isSpinning}
-                onPlaceBet={placeBet}
+                onPlaceBet={placeBetAction}
                 onStopAuto={stopAuto}
               />
             </div>

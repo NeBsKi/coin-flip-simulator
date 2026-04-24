@@ -11,7 +11,7 @@ export interface AutoSession {
 }
 
 export interface UseBetSimulationResult {
-  placeBet: () => void;
+  placeBetAction: () => void;
   stopAuto: () => void;
   isSpinning: boolean;
   lastBet: Bet | null;
