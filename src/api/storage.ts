@@ -3,7 +3,12 @@ import { DEFAULT_BALANCES, HISTORY_LIMIT, STORAGE_KEYS } from '@/constants';
 
 function safeParse<T>(raw: string | null): T | null {
   if (!raw) return null;
-  return JSON.parse(raw) as T;
+
+  try {
+    return JSON.parse(raw) as T;
+  } catch {
+    return null;
+  }
 }
 
 export function readUser(): User {
@@ -26,7 +31,8 @@ export function writeUser(user: User): void {
 }
 
 export function readHistory(): Bet[] {
-  return safeParse<Bet[]>(localStorage.getItem(STORAGE_KEYS.history)) ?? [];
+  const parsed = safeParse<Bet[]>(localStorage.getItem(STORAGE_KEYS.history));
+  return Array.isArray(parsed) ? parsed : [];
 }
 
 export function writeHistory(history: Bet[]): void {

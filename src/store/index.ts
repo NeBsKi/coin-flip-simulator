@@ -1,2 +1,2 @@
-export { useFilterStore } from './filterStore';
-export { useGameStore } from './gameStore';
+export { useFilterStore } from './filter-store';
+export { useGameStore } from './game-store';

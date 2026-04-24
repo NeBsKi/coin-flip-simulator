@@ -1,3 +1,3 @@
-export * from './BetPanel';
-export * from './History';
-export * from './Stats';
+export * from './bet-panel';
+export * from './history';
+export * from './stats';
